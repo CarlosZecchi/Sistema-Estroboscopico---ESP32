@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Controle Estroboscópio BLE</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; -webkit-tap-highlight-color: transparent; }
+        .slider-thumb::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 24px; height: 24px; background: #3b82f6; cursor: pointer; border-radius: 50%; margin-top: -8px; }
+        .slider-thumb::-moz-range-thumb { width: 24px; height: 24px; background: #3b82f6; cursor: pointer; border-radius: 50%; }
+        .btn-nudge { width: 60px; height: 60px; }
+    </style>
+</head>
+<body class="bg-gray-900 text-white flex flex-col items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-md bg-gray-800 rounded-2xl shadow-lg p-6 space-y-6">
+        
+        <div class="text-center">
+            <h1 class="text-2xl font-bold text-blue-400">Sistema Estrobo</h1>
+            <p id="status" class="text-sm text-gray-400 mt-1">Desconectado</p>
+        </div>
+
+        <button id="connectButton" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg transition-all duration-300 flex items-center justify-center space-x-2">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" /></svg>
+            <span>Conectar ao ESP32</span>
+        </button>
+
+        <div id="controlPanel" class="hidden space-y-6">
+            
+            <div>
+                <label for="frequencyInput" class="block text-sm font-medium text-gray-300 mb-2">Frequência Base (Hz)</label>
+                <div class="flex items-center space-x-2">
+                    <button id="freq-down" class="btn-nudge bg-gray-700 rounded-lg text-2xl font-bold">-</button>
+                    <input type="number" id="frequencyInput" step="0.1" value="57.3" class="flex-grow w-full bg-gray-700 border border-gray-600 text-white text-2xl rounded-lg focus:ring-blue-500 focus:border-blue-500 block p-3 text-center">
+                    <button id="freq-up" class="btn-nudge bg-gray-700 rounded-lg text-2xl font-bold">+</button>
+                </div>
+            </div>
+
+            <div>
+                <div class="flex justify-between items-center mb-2">
+                    <label for="periodAdjustSlider" class="text-sm font-medium text-gray-300">Ajuste Fino de Período (µs)</label>
+                    <span id="periodAdjustValue" class="text-sm font-semibold bg-gray-700 text-blue-300 px-2 py-1 rounded-md">0 µs</span>
+                </div>
+                <input id="periodAdjustSlider" type="range" min="0" max="2000" value="0" step="1" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-thumb">
+            </div>
+            
+            <div>
+                <div class="flex justify-between items-center mb-2">
+                    <label for="pulseDurationSlider" class="text-sm font-medium text-gray-300">Tempo de Pulso (µs)</label>
+                    <span id="pulseDurationValue" class="text-sm font-semibold bg-gray-700 text-blue-300 px-2 py-1 rounded-md">100 µs</span>
+                </div>
+                <input id="pulseDurationSlider" type="range" min="50" max="500" value="100" step="1" class="w-full h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer slider-thumb">
+            </div>
+
+        </div>
+        
+        <div id="error-message" class="text-red-400 text-center text-sm hidden"></div>
+    </div>
+
+    <script>
+        const SERVICE_UUID = "12345678-1234-5678-1234-56789abcdef0";
+        const CHARACTERISTIC_UUID = "abcdef01-1234-5678-1234-56789abcdef0";
+
+        let bleDevice, bleCharacteristic, isConnecting = false;
+        // Elementos da UI
+        const connectButton = document.getElementById('connectButton');
+        const statusDisplay = document.getElementById('status');
+        const controlPanel = document.getElementById('controlPanel');
+        const frequencyInput = document.getElementById('frequencyInput');
+        const periodAdjustSlider = document.getElementById('periodAdjustSlider');
+        const periodAdjustValue = document.getElementById('periodAdjustValue');
+        const pulseDurationSlider = document.getElementById('pulseDurationSlider');
+        const pulseDurationValue = document.getElementById('pulseDurationValue');
+        const errorMessage = document.getElementById('error-message');
+        const freqUpBtn = document.getElementById('freq-up');
+        const freqDownBtn = document.getElementById('freq-down');
+
+        async function connect() {
+            if (!navigator.bluetooth) { showError("Web Bluetooth não é suportado."); return; }
+            if (isConnecting) return;
+            isConnecting = true;
+            statusDisplay.textContent = 'Procurando...';
+            errorMessage.classList.add('hidden');
+            try {
+                bleDevice = await navigator.bluetooth.requestDevice({ filters: [{ services: [SERVICE_UUID] }] });
+                statusDisplay.textContent = 'Conectando...';
+                bleDevice.addEventListener('gattserverdisconnected', onDisconnected);
+                const server = await bleDevice.gatt.connect();
+                const service = await server.getPrimaryService(SERVICE_UUID);
+                bleCharacteristic = await service.getCharacteristic(CHARACTERISTIC_UUID);
+                statusDisplay.textContent = `Conectado a ${bleDevice.name}`;
+                connectButton.classList.add('hidden');
+                controlPanel.classList.remove('hidden');
+                sendData(); // Envia os valores iniciais ao conectar
+            } catch (error) {
+                statusDisplay.textContent = 'Falha na conexão.';
+                showError(`Erro: ${error.message}`);
+            } finally {
+                isConnecting = false;
+            }
+        }
+
+        function onDisconnected() {
+            statusDisplay.textContent = 'Desconectado';
+            bleDevice = null;
+            bleCharacteristic = null;
+            connectButton.classList.remove('hidden');
+            controlPanel.classList.add('hidden');
+        }
+        
+        async function sendData() {
+            if (!bleCharacteristic) return;
+            const freq = parseFloat(frequencyInput.value).toFixed(1);
+            const periodAdjust = parseInt(periodAdjustSlider.value);
+            const pulseDuration = parseInt(pulseDurationSlider.value);
+            
+            const command = `${freq},${periodAdjust},${pulseDuration}`;
+            
+            try {
+                const encoder = new TextEncoder();
+                await bleCharacteristic.writeValue(encoder.encode(command));
+                console.log(`Comando enviado: ${command}`);
+            } catch (error) {
+                showError(`Erro ao enviar: ${error.message}`);
+            }
+        }
+
+        function updateSliderValues() {
+            periodAdjustValue.textContent = `${periodAdjustSlider.value} µs`;
+            pulseDurationValue.textContent = `${pulseDurationSlider.value} µs`;
+        }
+
+        function adjustFrequency(amount) {
+            let currentFreq = parseFloat(frequencyInput.value);
+            currentFreq += amount;
+            frequencyInput.value = currentFreq.toFixed(1);
+            sendData();
+        }
+
+        // Event Listeners
+        connectButton.addEventListener('click', connect);
+        
+        periodAdjustSlider.addEventListener('input', updateSliderValues);
+        periodAdjustSlider.addEventListener('change', sendData);
+
+        pulseDurationSlider.addEventListener('input', updateSliderValues);
+        pulseDurationSlider.addEventListener('change', sendData);
+
+        frequencyInput.addEventListener('change', sendData);
+        freqUpBtn.addEventListener('click', () => adjustFrequency(0.1));
+        freqDownBtn.addEventListener('click', () => adjustFrequency(-0.1));
+
+        updateSliderValues();
+    </script>
+</body>
+</html>

@@ -1,6 +1,6 @@
 // --- Verificação de Compilação para a Placa ESP32 ---
 #if !defined(ESP32)
-  #error Este codigo foi feito para placas ESP32. Por favor, selecione uma placa ESP32 no menu Ferramentas > Placa.
+  #error Este codigo foi feito para placas ESP32
 #endif
 
 #include <Arduino.h>
@@ -19,8 +19,7 @@ BLEServer *pServer = nullptr;
 BLECharacteristic *pCharacteristic = nullptr;
 bool deviceConnected = false;
 
-// --- Variáveis de Temporização (Software) ---
-// Voláteis para comunicação segura entre o BLE (que escreve) e o loop() (que lê).
+//comunicação segura entre o BLE (que escreve) e o loop() (que lê).
 volatile unsigned long tempoLigadoFinal_us = 100;
 volatile unsigned long tempoApagadoFinal_us = 1000000 - 100; // Valor inicial para 1 Hz
 
